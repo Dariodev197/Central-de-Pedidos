@@ -14,6 +14,7 @@ import {
 } from '@po-ui/ng-components';
 import { PedidoService } from '../../services/pedido.service';
 import { PedidoBloqueado, PedidoDetalhe, ItemPedido } from '../../models/pedido.model';
+import { TemaService } from '../../services/tema.service';
 
 /**
  * Central de Liberação de Crédito.
@@ -54,19 +55,24 @@ export class LiberacaoComponent implements OnInit {
   processando = ''; // número do pedido em processamento
 
   acoesPagina: PoPageAction[] = [
-    { label: 'Atualizar', icon: 'po-icon-refresh', action: () => this.carregar() },
-  ];
+  { label: 'Atualizar', icon: 'po-icon-refresh', action: () => this.carregar() },
 
-  constructor(
-    private service: PedidoService,
-    private notification: PoNotificationService,
-    private dialog: PoDialogService
-  ) {}
+];
 
-  ngOnInit(): void {
-    this.carregar();
-  }
+// 3. Injeta no construtor (junto dos que já existem)
+constructor(
+  private service: PedidoService,
+  private notification: PoNotificationService,
+  private dialog: PoDialogService,
+  private tema: TemaService
+) {}
 
+// 4. No ngOnInit, aplica o tema salvo ANTES de carregar
+ngOnInit(): void {
+  this.tema.aplicarTemaSalvo();
+  this.carregar();
+}
+  
   carregar(): void {
     this.carregando = true;
     this.service.listarBloqueados().subscribe({

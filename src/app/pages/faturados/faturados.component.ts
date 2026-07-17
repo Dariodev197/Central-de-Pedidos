@@ -8,9 +8,11 @@ import {
   PoLoadingModule,
   PoNotificationService,
   PoPageAction,
+  PoDialogService,
 } from '@po-ui/ng-components';
 import { PedidoService } from '../../services/pedido.service';
 import { PedidoFaturado } from '../../models/pedido.model';
+import { TemaService } from '../../services/tema.service';
 
 /**
  * Pedidos Faturados — visão de acompanhamento.
@@ -44,18 +46,26 @@ export class FaturadosComponent implements OnInit {
     { property: 'valor',    label: 'Valor',       width: '16%', type: 'currency', format: 'BRL' },
   ];
 
+
+
   acoesPagina: PoPageAction[] = [
-    { label: 'Atualizar', icon: 'po-icon-refresh', action: () => this.carregar() },
-  ];
+  { label: 'Atualizar', icon: 'po-icon-refresh', action: () => this.carregar() },
+  
+];
 
-  constructor(
-    private service: PedidoService,
-    private notification: PoNotificationService
-  ) {}
+// 3. Injeta no construtor (junto dos que já existem)
+constructor(
+  private service: PedidoService,
+  private notification: PoNotificationService,
+  private dialog: PoDialogService,
+  private tema: TemaService
+) {}
 
-  ngOnInit(): void {
-    this.carregar();
-  }
+// 4. No ngOnInit, aplica o tema salvo ANTES de carregar
+ngOnInit(): void {
+  this.tema.aplicarTemaSalvo();
+  this.carregar();
+}
 
   carregar(): void {
     this.carregando = true;

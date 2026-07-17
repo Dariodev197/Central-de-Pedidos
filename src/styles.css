@@ -131,3 +131,56 @@
   padding: 48px 0;
   font-size: 1rem;
 }
+
+/* ============================================================
+   TEMA ESCURO (classe tema-escuro no <html>)
+   Inverte os tokens neutros do PO-UI: fundos escuros, textos
+   claros. Cores de acao (azul Protheus) permanecem originais.
+   ============================================================ */
+html.tema-escuro {
+  /* Fundos (light = fundo no vocabulario do PO-UI) */
+  --color-neutral-light-00: #1c1c1e;
+  --color-neutral-light-05: #232326;
+  --color-neutral-light-10: #2a2a2e;
+  --color-neutral-light-20: #37373c;
+  --color-neutral-light-30: #47474d;
+
+  /* Intermediarios */
+  --color-neutral-mid-40: #7c7c83;
+  --color-neutral-mid-60: #a7a7ae;
+
+  /* Textos (dark = texto no vocabulario do PO-UI) */
+  --color-neutral-dark-70: #c9c9cf;
+  --color-neutral-dark-80: #dcdce1;
+  --color-neutral-dark-90: #ededf1;
+  --color-neutral-dark-95: #f6f6f8;
+
+  background-color: var(--color-neutral-light-00);
+  color: var(--color-neutral-dark-90);
+}
+
+html.tema-escuro body {
+  background-color: var(--color-neutral-light-00);
+}
+
+/* Classes proprias do painel: forca os tokens no escuro
+   (vence qualquer cor fixa definida acima no arquivo) */
+html.tema-escuro .metrica-valor   { color: var(--color-neutral-dark-95); }
+html.tema-escuro .metrica-desc    { color: var(--color-neutral-mid-60); }
+html.tema-escuro .rotulo          { color: var(--color-neutral-dark-80); }
+html.tema-escuro .tabela-itens th { background: var(--color-neutral-light-10); color: var(--color-neutral-dark-90); }
+html.tema-escuro .tabela-itens td { color: var(--color-neutral-dark-90); border-color: var(--color-neutral-light-20); }
+html.tema-escuro .limite-info span,
+html.tema-escuro .vazio           { color: var(--color-neutral-mid-60); }
+
+/* Tema escuro: caixas internas do detalhe expandido */
+html.tema-escuro .itens-box {
+  background: var(--color-neutral-light-05);
+  border-color: var(--color-neutral-light-20);
+}
+html.tema-escuro .detalhe,
+html.tema-escuro .limite-box       { background: transparent; }
+html.tema-escuro .tabela-itens,
+html.tema-escuro .tabela-itens tbody tr { background: transparent; }
+html.tema-escuro .tabela-itens tbody tr:nth-child(even) { background: var(--color-neutral-light-10); }
+html.tema-escuro .barra            { background: var(--color-neutral-light-20); }
