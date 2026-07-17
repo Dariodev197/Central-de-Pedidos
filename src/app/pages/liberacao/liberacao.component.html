@@ -1,0 +1,135 @@
+<po-page-default
+  p-title="Liberação de Crédito"
+  [p-actions]="acoesPagina">
+
+  <po-loading-overlay *ngIf="carregando" [p-screen-lock]="true"></po-loading-overlay>
+
+  <!-- Blocos de resumo -->
+  <div class="po-row resumo">
+    <po-widget class="po-md-4" p-title="Pedidos bloqueados">
+      <div class="metrica">
+        <span class="metrica-valor">{{ totalPedidos }}</span>
+        <span class="metrica-desc">aguardando análise</span>
+      </div>
+    </po-widget>
+
+    <po-widget class="po-md-4" p-title="Valor retido">
+      <div class="metrica">
+        <span class="metrica-valor">{{ valorTotal | currency: 'BRL' }}</span>
+        <span class="metrica-desc">em pedidos travados</span>
+      </div>
+    </po-widget>
+
+    <po-widget class="po-md-4" p-title="Clientes">
+      <div class="metrica">
+        <span class="metrica-valor">{{ clientesUnicos }}</span>
+        <span class="metrica-desc">com pedido em análise</span>
+      </div>
+    </po-widget>
+  </div>
+
+  <!-- Lista de pedidos em formato de cards expansíveis -->
+  <po-list-view
+    [p-items]="pedidos"
+    p-property-title="nome"
+    p-property-subtitle="pedido"
+    (p-show-detail)="aoExpandir($event)">
+
+    <!-- Template do detalhe: abre ao expandir cada card -->
+    <div *p-list-view-detail-template="let pedido" class="detalhe">
+
+      <!-- Cabeçalho do pedido com po-info -->
+      <div class="po-row">
+        <po-info class="po-md-3" p-label="Pedido" [p-value]="pedido.pedido"></po-info>
+        <po-info class="po-md-3" p-label="Cliente" [p-value]="pedido.cliente + ' - ' + pedido.nome"></po-info>
+        <po-info class="po-md-2" p-label="Vendedor" [p-value]="pedido.vendedor"></po-info>
+        <po-info class="po-md-2" p-label="Emissão" [p-value]="pedido.emissao"></po-info>
+        <po-info class="po-md-2" p-label="Valor" [p-value]="(pedido.valor | currency: 'BRL') || ''"></po-info>
+      </div>
+
+      <!-- Motivo do bloqueio com po-tag colorida -->
+      <div class="po-row bloqueio-linha">
+        <div class="po-md-6">
+          <span class="rotulo">Motivo do bloqueio:</span>
+          <po-tag
+            [p-value]="pedido.motivo"
+            [p-color]="corTag(pedido.bloqueio)"
+            p-icon="po-icon-warning">
+          </po-tag>
+        </div>
+        <div class="po-md-6">
+          <span class="rotulo">Limite de crédito:</span>
+          <po-tag
+            [p-value]="(pedido.limite | currency: 'BRL') || ''"
+            p-color="color-01"
+            p-icon="po-icon-finance">
+          </po-tag>
+        </div>
+      </div>
+
+      <!-- Itens do pedido (carregados via detalhe) -->
+      <div *ngIf="detalhes[pedido.pedido] as det" class="itens-box">
+        <span class="rotulo">Itens do pedido</span>
+        <table class="tabela-itens">
+          <thead>
+            <tr>
+              <th>Item</th><th>Produto</th><th>Descrição</th>
+              <th class="num">Qtd</th><th class="num">Preço</th><th class="num">Total</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr *ngFor="let it of det.itens; trackBy: trackItem">
+              <td>{{ it.item }}</td>
+              <td class="mono">{{ it.produto }}</td>
+              <td>{{ it.descri }}</td>
+              <td class="num">{{ it.qtd }}</td>
+              <td class="num">{{ it.preco | currency: 'BRL' }}</td>
+              <td class="num">{{ it.valor | currency: 'BRL' }}</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <!-- Consumo de limite: barra visual -->
+        <div class="limite-box">
+          <span class="rotulo">
+            Consumo do limite após este pedido: {{ percentualLimite(det) }}%
+          </span>
+          <div class="barra">
+            <div class="barra-preenchida"
+                 [style.width.%]="percentualLimite(det)"
+                 [class.barra-critica]="percentualLimite(det) >= 100">
+            </div>
+          </div>
+          <div class="limite-info">
+            <span>Saldo devedor: {{ det.saldo | currency: 'BRL' }}</span>
+            <span>Limite: {{ det.limite | currency: 'BRL' }}</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Ações de liberar/rejeitar -->
+      <div class="acoes-detalhe">
+        <po-button
+          p-label="Rejeitar"
+          p-icon="po-icon-close"
+          p-kind="tertiary"
+          [p-danger]="true"
+          [p-loading]="processando === pedido.pedido"
+          (p-click)="confirmarRejeicao(pedido)">
+        </po-button>
+        <po-button
+          p-label="Liberar crédito"
+          p-icon="po-icon-ok"
+          p-kind="primary"
+          [p-loading]="processando === pedido.pedido"
+          (p-click)="confirmarLiberacao(pedido)">
+        </po-button>
+      </div>
+    </div>
+  </po-list-view>
+
+  <div *ngIf="!carregando && pedidos.length === 0" class="vazio">
+    Nenhum pedido bloqueado por crédito no momento. Tudo liberado! 🎉
+  </div>
+
+</po-page-default>

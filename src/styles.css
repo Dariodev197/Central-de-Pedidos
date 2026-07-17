@@ -1,1 +1,133 @@
-/* You can add global styles to this file, and also import other style files */
+/* ============================================================
+   Central de Liberação de Crédito — estilos complementares
+   Complementa o tema TOTVS do PO-UI com toques de "painel
+   financeiro": métricas grandes, barra de consumo de limite,
+   e respiração generosa entre blocos.
+   ============================================================ */
+
+/* Resumo do topo — blocos de métrica */
+.resumo {
+  margin-bottom: 24px;
+}
+
+.metrica {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px 0;
+}
+.metrica-valor {
+  font-size: 2rem;
+  font-weight: 700;
+  color: #1a2233;
+  line-height: 1.1;
+}
+.metrica-desc {
+  font-size: 0.82rem;
+  color: #6c757d;
+}
+
+/* Detalhe expandido do po-list-view */
+.detalhe {
+  padding: 8px 4px 4px;
+}
+
+.rotulo {
+  display: block;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #6c757d;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 6px;
+}
+
+.bloqueio-linha {
+  margin: 16px 0;
+  align-items: center;
+}
+
+/* Caixa dos itens do pedido */
+.itens-box {
+  background: #fafbfc;
+  border: 1px solid #e3e6ec;
+  border-radius: 10px;
+  padding: 16px;
+  margin: 16px 0;
+}
+
+.tabela-itens {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 8px;
+  font-size: 0.88rem;
+}
+.tabela-itens th {
+  text-align: left;
+  padding: 6px 10px;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  color: #6c757d;
+  border-bottom: 1px solid #e3e6ec;
+}
+.tabela-itens td {
+  padding: 7px 10px;
+  border-bottom: 1px solid #eef0f4;
+}
+.tabela-itens tr:last-child td {
+  border-bottom: none;
+}
+.tabela-itens .num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.mono {
+  font-variant-numeric: tabular-nums;
+  color: #5b6474;
+}
+
+/* Barra de consumo de limite — a assinatura visual */
+.limite-box {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px dashed #d5d9e0;
+}
+.barra {
+  height: 10px;
+  background: #e3e6ec;
+  border-radius: 999px;
+  overflow: hidden;
+  margin: 8px 0;
+}
+.barra-preenchida {
+  height: 100%;
+  background: linear-gradient(90deg, #3e4eb8, #5563c9);
+  border-radius: 999px;
+  transition: width 0.4s ease;
+}
+.barra-critica {
+  background: linear-gradient(90deg, #b91c1c, #dc2626) !important;
+}
+.limite-info {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.82rem;
+  color: #6c757d;
+}
+
+/* Ações do detalhe */
+.acoes-detalhe {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid #eef0f4;
+}
+
+.vazio {
+  text-align: center;
+  color: #6c757d;
+  padding: 48px 0;
+  font-size: 1rem;
+}

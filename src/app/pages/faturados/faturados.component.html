@@ -1,0 +1,36 @@
+<po-page-default
+  p-title="Pedidos Faturados"
+  [p-actions]="acoesPagina">
+
+  <po-loading-overlay *ngIf="carregando" [p-screen-lock]="true"></po-loading-overlay>
+
+  <!-- Resumo -->
+  <div class="po-row resumo">
+    <po-widget class="po-md-6" p-title="Pedidos faturados">
+      <div class="metrica">
+        <span class="metrica-valor">{{ pedidos.length }}</span>
+        <span class="metrica-desc">no período</span>
+      </div>
+    </po-widget>
+
+    <po-widget class="po-md-6" p-title="Valor faturado">
+      <div class="metrica">
+        <span class="metrica-valor">{{ valorFaturado | currency: 'BRL' }}</span>
+        <span class="metrica-desc">total dos pedidos</span>
+      </div>
+    </po-widget>
+  </div>
+
+  <!-- Tabela de faturados -->
+  <po-table
+    [p-columns]="colunas"
+    [p-items]="pedidos"
+    [p-sort]="true"
+    [p-striped]="true">
+  </po-table>
+
+  <div *ngIf="!carregando && pedidos.length === 0" class="vazio">
+    Nenhum pedido faturado encontrado.
+  </div>
+
+</po-page-default>

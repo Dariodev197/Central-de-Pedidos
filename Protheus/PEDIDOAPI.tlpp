@@ -1,0 +1,796 @@
+#include 'totvs.ch'
+#include 'tlpp-core.th'
+
+/*/{Protheus.doc} PEDIDOAPI
+    ============================================================
+    API REST - Central de Liberacao de Credito de Pedidos
+    Padrao do curso_api_tabelas.tlpp:
+      - fwAdapterBaseV2 para consultas GET (query, paginacao,
+        search, order e JSON automaticos)
+      - errorClass + BEGIN SEQUENCE/RECOVER + setFault
+      - Checagem de ambiente via type('cEmpAnt')
+    ============================================================
+
+    CORRECAO v7:
+      - Liberacao de credito refeita: agora atualiza os registros
+        existentes da SC9 (limpa C9_BLCRED e grava C9_DATALIB),
+        como o MATA450 faz. O MaLibDoFat foi removido: ele gerava
+        NOVOS registros na SC9 sem limpar o bloqueio dos antigos,
+        entao o pedido retornava 200 mas continuava na lista.
+
+    NOVIDADE v6:
+      - Listagens tambem devolvem 'nfiscal' e 'serie' (C9_NFISCAL /
+        C9_SERIENF) - preenchidos nos faturados, vazios nos bloqueados.
+
+    NOVIDADE v5:
+      - As listagens (/bloqueados e /faturados) agora devolvem em
+        cada item os campos calculados 'valor' (soma dos itens do
+        pedido) e 'motivo' (texto do C9_BLCRED), enriquecidos no
+        pos-processamento do JSON do adapter (fnEnriquece).
+
+    CORRECAO v4:
+      - "type mismatch on +" no RECOVER: quando o break(err) e
+        disparado manualmente, err:errorstack e err:errorenv sao
+        NIL (so vem preenchidos em erro real de runtime). A
+        montagem da mensagem agora valida o tipo de cada
+        propriedade antes de concatenar (fnErrMsg).
+      - Codeblock do errorblock corrigido para 'err := e'.
+
+    ESTRUTURA DE DADOS (TDN):
+      SC5 = cabecalho do pedido / SC6 = itens
+      SC9 = liberacoes (C9_BLCRED = bloqueio de credito)
+      SA1 = cliente (limite de credito, saldo)
+
+    C9_BLCRED: vazio=sem bloqueio | 01=valor | 04=limite vencido
+               09=rejeitado | 10=faturado | ZZ=tardia
+
+    RETORNO DAS LISTAGENS (fwAdapterBaseV2):
+      { "items":[ { "pedido":"000001", ... } ], "hasNext": false }
+      >>> No front, o numero do pedido e "item.pedido" <<<
+
+    LIBERACAO: atualizacao direta da SC9 (ver CORRECAO v7).
+    Validar em homologacao conferindo o gravado na SC9 e o
+    faturamento (MATA460) do pedido liberado.
+
+    Rotas:
+      GET  /api/pedidos/bloqueados      lista paginada de bloqueados por credito
+      GET  /api/pedidos/faturados       lista paginada de faturados (C9_BLCRED=10)
+      GET  /api/pedidos/detalhe/:num    cabecalho + itens + credito
+      POST /api/pedidos/liberar         body { "num": "000001" }
+      POST /api/pedidos/rejeitar        body { "num": "000001" }
+
+    @type    Rest TLPP
+    @author  Dario
+    @version 12.1.2510
+/*/
+
+namespace pedidos.api
+
+//=============================================================
+// GET /api/pedidos/bloqueados
+//=============================================================
+@get('/api/pedidos/bloqueados')
+
+/*/{Protheus.doc} U_PEDBLOQ
+    Lista os pedidos bloqueados por credito (paginada)
+    @type  Function
+/*/
+Function U_PEDBLOQ() as logical
+
+    Local lret       := .T. as logical
+    Local lRPC       := .F. as logical
+    Local bLastError := errorblock({|e| err := e, break(err)}) as codeblock
+    Local cResult    := '' as character
+
+    Private err        := errorClass():new()
+    Private jHeaderRes := nil as json
+
+    jHeaderRes := jsonObject():new()
+    jHeaderRes['Content-Type'] := 'application/json'
+
+    IF type('cEmpAnt') <> 'C'
+        rpcSetType(3)
+        rpcSetEnv('99','01')
+        lRPC := .T.
+    EndIF
+
+    BEGIN SEQUENCE
+
+        cResult := fnGetPed(.F.)   // .F. = bloqueados (aguardando financeiro)
+
+        IF empty(cResult)
+            err:description := 'Falha ao consultar pedidos bloqueados'
+            break(err)
+        EndIF
+
+        oRest:setResponse(cResult)
+
+    RECOVER
+
+        oRest:setFault(fnErrMsg())
+        lret := .F.
+
+    END SEQUENCE
+
+    errorblock(bLastError)
+
+    IF lRPC
+        rpcClearEnv()
+    EndIF
+
+Return lret
+
+//=============================================================
+// GET /api/pedidos/faturados
+//=============================================================
+@get('/api/pedidos/faturados')
+
+/*/{Protheus.doc} U_PEDFAT
+    Lista os pedidos ja faturados (C9_BLCRED = 10), paginada
+    @type  Function
+/*/
+Function U_PEDFAT() as logical
+
+    Local lret       := .T. as logical
+    Local lRPC       := .F. as logical
+    Local bLastError := errorblock({|e| err := e, break(err)}) as codeblock
+    Local cResult    := '' as character
+
+    Private err        := errorClass():new()
+    Private jHeaderRes := nil as json
+
+    jHeaderRes := jsonObject():new()
+    jHeaderRes['Content-Type'] := 'application/json'
+
+    IF type('cEmpAnt') <> 'C'
+        rpcSetType(3)
+        rpcSetEnv('99','01')
+        lRPC := .T.
+    EndIF
+
+    BEGIN SEQUENCE
+
+        cResult := fnGetPed(.T.)   // .T. = faturados (C9_BLCRED = 10)
+
+        IF empty(cResult)
+            err:description := 'Falha ao consultar pedidos faturados'
+            break(err)
+        EndIF
+
+        oRest:setResponse(cResult)
+
+    RECOVER
+
+        oRest:setFault(fnErrMsg())
+        lret := .F.
+
+    END SEQUENCE
+
+    errorblock(bLastError)
+
+    IF lRPC
+        rpcClearEnv()
+    EndIF
+
+Return lret
+
+//=============================================================
+// GET /api/pedidos/detalhe/:num
+//=============================================================
+@get('/api/pedidos/detalhe/:num')
+
+/*/{Protheus.doc} U_PEDDET
+    Detalhe do pedido: cabecalho + itens + credito do cliente
+    @type  Function
+/*/
+Function U_PEDDET() as logical
+
+    Local lret       := .T. as logical
+    Local lRPC       := .F. as logical
+    Local jPath      := nil as json
+    Local bLastError := errorblock({|e| err := e, break(err)}) as codeblock
+    Local cNum       := '' as character
+    Local cResult    := '' as character
+
+    Private err        := errorClass():new()
+    Private jHeaderRes := nil as json
+
+    jHeaderRes := jsonObject():new()
+    jHeaderRes['Content-Type'] := 'application/json'
+
+    IF type('cEmpAnt') <> 'C'
+        rpcSetType(3)
+        rpcSetEnv('99','01')
+        lRPC := .T.
+    EndIF
+
+    BEGIN SEQUENCE
+
+        jPath := oRest:getPathParamsRequest()
+        IF jPath != nil .And. valType(jPath['num']) == 'C'
+            cNum := jPath['num']
+        EndIF
+
+        // Protecao contra front mandando 'undefined'/'null' na URL
+        IF empty(cNum) .Or. lower(alltrim(cNum)) $ 'undefined|null'
+            err:description := 'Numero do pedido nao informado (recebido: "' + cNum + '")'
+            break(err)
+        EndIF
+
+        cResult := fnGetDet(cNum)
+
+        IF empty(cResult)
+            err:description := 'Pedido ' + cNum + ' nao encontrado'
+            break(err)
+        EndIF
+
+        oRest:setResponse(cResult)
+
+    RECOVER
+
+        oRest:setFault(fnErrMsg())
+        lret := .F.
+
+    END SEQUENCE
+
+    errorblock(bLastError)
+
+    IF lRPC
+        rpcClearEnv()
+    EndIF
+
+Return lret
+
+//=============================================================
+// POST /api/pedidos/liberar
+//=============================================================
+@post('/api/pedidos/liberar')
+
+/*/{Protheus.doc} U_PEDLIB
+    Libera o credito de um pedido via MaLibDoFat
+    Body: { "num": "000001" }
+    @type  Function
+/*/
+Function U_PEDLIB() as logical
+
+    Local lret       := .T. as logical
+    Local lRPC       := .F. as logical
+    Local bLastError := errorblock({|e| err := e, break(err)}) as codeblock
+    Local cNum       := '' as character
+
+    Private err        := errorClass():new()
+    Private jHeaderRes := nil as json
+
+    jHeaderRes := jsonObject():new()
+    jHeaderRes['Content-Type'] := 'application/json'
+
+    IF type('cEmpAnt') <> 'C'
+        rpcSetType(3)
+        rpcSetEnv('99','01')
+        lRPC := .T.
+    EndIF
+
+    BEGIN SEQUENCE
+
+        cNum := fnNumBody()
+
+        IF empty(cNum) .Or. lower(alltrim(cNum)) $ 'undefined|null'
+            err:description := 'Numero do pedido nao informado no body (recebido: "' + cNum + '")'
+            break(err)
+        EndIF
+
+        IF !fnLiberar(cNum)
+            break(err)
+        EndIF
+
+        oRest:setResponse('{"sucesso":true,"acao":"liberado","pedido":"' + alltrim(cNum) + '"}')
+
+    RECOVER
+
+        oRest:setFault(fnErrMsg())
+        lret := .F.
+
+    END SEQUENCE
+
+    errorblock(bLastError)
+
+    IF lRPC
+        rpcClearEnv()
+    EndIF
+
+Return lret
+
+//=============================================================
+// POST /api/pedidos/rejeitar
+//=============================================================
+@post('/api/pedidos/rejeitar')
+
+/*/{Protheus.doc} U_PEDREJ
+    Rejeita a liberacao de credito (C9_BLCRED = 09)
+    Body: { "num": "000001" }
+    @type  Function
+/*/
+Function U_PEDREJ() as logical
+
+    Local lret       := .T. as logical
+    Local lRPC       := .F. as logical
+    Local bLastError := errorblock({|e| err := e, break(err)}) as codeblock
+    Local cNum       := '' as character
+
+    Private err        := errorClass():new()
+    Private jHeaderRes := nil as json
+
+    jHeaderRes := jsonObject():new()
+    jHeaderRes['Content-Type'] := 'application/json'
+
+    IF type('cEmpAnt') <> 'C'
+        rpcSetType(3)
+        rpcSetEnv('99','01')
+        lRPC := .T.
+    EndIF
+
+    BEGIN SEQUENCE
+
+        cNum := fnNumBody()
+
+        IF empty(cNum) .Or. lower(alltrim(cNum)) $ 'undefined|null'
+            err:description := 'Numero do pedido nao informado no body (recebido: "' + cNum + '")'
+            break(err)
+        EndIF
+
+        IF !fnRejeitar(cNum)
+            break(err)
+        EndIF
+
+        oRest:setResponse('{"sucesso":true,"acao":"rejeitado","pedido":"' + alltrim(cNum) + '"}')
+
+    RECOVER
+
+        oRest:setFault(fnErrMsg())
+        lret := .F.
+
+    END SEQUENCE
+
+    errorblock(bLastError)
+
+    IF lRPC
+        rpcClearEnv()
+    EndIF
+
+Return lret
+
+//=============================================================
+// STATIC FUNCTIONS
+//=============================================================
+
+/*/{Protheus.doc} fnErrMsg
+    Monta a mensagem de erro do objeto err (Private) validando o
+    tipo de cada propriedade. Em break() manual, errorstack e
+    errorenv sao NIL - concatenar direto causava
+    "type mismatch on +".
+    @type  Static Function
+/*/
+Static Function fnErrMsg() as character
+
+    Local cMsg := '' as character
+
+    IF valType(err:description) == 'C'
+        cMsg += err:description
+    EndIF
+
+    IF valType(err:errorstack) == 'C' .And. !empty(err:errorstack)
+        cMsg += CRLF + err:errorstack
+    EndIF
+
+    IF valType(err:errorenv) == 'C' .And. !empty(err:errorenv)
+        cMsg += CRLF + err:errorenv
+    EndIF
+
+    IF empty(cMsg)
+        cMsg := 'Erro nao identificado'
+    EndIF
+
+    // Loga no console para diagnostico
+    ConOut('=== ERRO PEDIDOAPI ===')
+    ConOut(cMsg)
+
+Return cMsg
+
+/*/{Protheus.doc} fnGetPed
+    Consulta pedidos na SC9 via fwAdapterBaseV2.
+    lFaturados = .F. -> bloqueados por credito (preenchido e != 10)
+    lFaturados = .T. -> faturados (C9_BLCRED = 10)
+    Query params suportados: search, order, page, pageSize.
+    A SC9 tem 1 linha por item; o filtro por MIN(R_E_C_N_O_)
+    garante 1 linha por pedido na listagem.
+    @type  Static Function
+/*/
+Static Function fnGetPed(lFaturados as logical) as character
+
+    Local cResult   := ''   as character
+    Local cQuery    := ''   as character
+    Local cWhere    := ''   as character
+    Local cFiltro   := ''   as character
+    Local cSearch   := ''   as character
+    Local cOrder    := ''   as character
+    Local nPage     := 1    as variant
+    Local nPageSize := 9999 as variant
+    Local oQuery    := nil  as object
+    Local jQuery    := nil  as json
+
+    // Filtro que muda entre as duas listagens
+    IF lFaturados
+        cFiltro := "C9_BLCRED = '10' "
+    Else
+        cFiltro := "C9_BLCRED <> '  ' AND C9_BLCRED <> '10' "
+    EndIF
+
+    oQuery := fwAdapterBaseV2():new('GET',.T.)
+
+    oQuery:addMapFields('pedido'   ,'C5_NUM'    ,.T.,.T.)
+    oQuery:addMapFields('cliente'  ,'C5_CLIENTE',.T.,.T.)
+    oQuery:addMapFields('nome'     ,'A1_NOME'   ,.T.,.T.)
+    oQuery:addMapFields('vendedor' ,'C5_VEND1'  ,.T.,.T.)
+    oQuery:addMapFields('emissao'  ,'C5_EMISSAO',.T.,.T.)
+    oQuery:addMapFields('limite'   ,'A1_LC'     ,.T.,.T.)
+    oQuery:addMapFields('saldo'    ,'A1_SALDUP' ,.T.,.T.)
+    oQuery:addMapFields('bloqueio' ,'C9_BLCRED' ,.T.,.T.)
+    oQuery:addMapFields('nfiscal'  ,'C9_NFISCAL',.T.,.T.)   // NF gerada (faturados)
+    oQuery:addMapFields('serie'    ,'C9_SERIENF',.T.,.T.)   // serie da NF
+
+    cQuery := "SELECT #QueryFields# FROM " + retSQLName("SC9") + " SC9 "
+    cQuery += "JOIN " + retSQLName("SC5") + " SC5 ON SC5.D_E_L_E_T_ = ' ' "
+    cQuery += "  AND C5_FILIAL = '" + xFilial("SC5") + "' AND C5_NUM = C9_PEDIDO "
+    cQuery += "JOIN " + retSQLName("SA1") + " SA1 ON SA1.D_E_L_E_T_ = ' ' "
+    cQuery += "  AND A1_FILIAL = '" + xFilial("SA1") + "' "
+    cQuery += "  AND A1_COD = C5_CLIENTE AND A1_LOJA = C5_LOJACLI "
+    cQuery += "WHERE #QueryWhere# "
+
+    cWhere := "SC9.D_E_L_E_T_ = ' ' "
+    cWhere += "AND C9_FILIAL = '" + xFilial("SC9") + "' "
+    cWhere += "AND " + cFiltro
+    // 1 linha por pedido (a SC9 tem 1 registro por item)
+    cWhere += "AND SC9.R_E_C_N_O_ = ( "
+    cWhere += "  SELECT MIN(SC9B.R_E_C_N_O_) FROM " + retSQLName("SC9") + " SC9B "
+    cWhere += "  WHERE SC9B.D_E_L_E_T_ = ' ' "
+    cWhere += "    AND SC9B.C9_FILIAL = SC9.C9_FILIAL "
+    cWhere += "    AND SC9B.C9_PEDIDO = SC9.C9_PEDIDO "
+    cWhere += "    AND SC9B." + cFiltro + " ) "
+
+    IF type('oRest') == 'O'
+
+        jQuery := oRest:getQueryRequest()
+
+        IF jQuery != nil
+            cSearch   := if(valType(jQuery['search'  ]) == 'C', jQuery['search'  ], '')
+            cOrder    := if(valType(jQuery['order'   ]) == 'C', jQuery['order'   ], '')
+            nPage     := if(valType(jQuery['page'    ]) == 'C', val(jQuery['page'    ]), 1)
+            nPageSize := if(valType(jQuery['pageSize']) == 'C', val(jQuery['pageSize']), 9999)
+        EndIF
+
+    EndIF
+
+    IF !empty(cSearch)
+        // Remove aspas simples para nao quebrar a query
+        cSearch := strTran(alltrim(upper(cSearch)), "'", "")
+        cWhere  += "AND (A1_NOME LIKE '%" + cSearch + "%' OR C5_NUM LIKE '%" + cSearch + "%') "
+    EndIF
+
+    IF empty(cOrder)
+        cOrder := 'C5_EMISSAO,C5_NUM'
+    EndIF
+
+    IF nPage <= 0
+        nPage := 1
+    EndIF
+
+    IF nPageSize <= 0
+        nPageSize := 10
+    EndIF
+
+    oQuery:setQuery(cQuery)
+    oQuery:setWhere(cWhere)
+    oQuery:setOrder(cOrder)
+    oQuery:setPageSize(nPageSize)
+    oQuery:setPage(nPage)
+
+    IF oQuery:execute()
+        oQuery:fillGetResponse()
+        cResult := oQuery:getJsonResponse()
+        // Enriquece cada item com o valor total do pedido e o motivo
+        // do bloqueio em texto (o adapter so mapeia campos fisicos)
+        cResult := fnEnriquece(cResult)
+    EndIF
+
+Return cResult
+
+/*/{Protheus.doc} fnEnriquece
+    Pos-processa o JSON do fwAdapterBaseV2 adicionando em cada item:
+      valor  -> soma dos itens do pedido (SC6)
+      motivo -> descricao do C9_BLCRED em texto
+    @type  Static Function
+/*/
+Static Function fnEnriquece(cJson as character) as character
+
+    Local jResp  := jsonObject():new() as json
+    Local aItems := {} as array
+    Local nI     := 0  as numeric
+
+    IF valType(jResp:fromJson(cJson)) == 'C'
+        Return cJson   // JSON invalido: devolve como veio
+    EndIF
+
+    IF valType(jResp['items']) <> 'A'
+        Return cJson
+
+    EndIF
+
+    aItems := jResp['items']
+
+    For nI := 1 To len(aItems)
+        IF valType(aItems[nI]['pedido']) == 'C'
+            aItems[nI]['valor']  := fnValorPed(alltrim(aItems[nI]['pedido']))
+            aItems[nI]['motivo'] := fnMotivo(aItems[nI]['bloqueio'])
+        EndIF
+    Next nI
+
+Return jResp:toJson()
+
+/*/{Protheus.doc} fnMotivo
+    Traduz o codigo do C9_BLCRED em texto legivel (fonte: TDN).
+    @type  Static Function
+/*/
+Static Function fnMotivo(cCod) as character
+
+    Local cTexto := '' as character
+
+    IF valType(cCod) <> 'C'
+        Return 'Bloqueio de credito'
+    EndIF
+
+    Do Case
+        Case alltrim(cCod) == '01' ; cTexto := 'Limite de credito insuficiente'
+        Case alltrim(cCod) == '04' ; cTexto := 'Limite de credito vencido'
+        Case alltrim(cCod) == '09' ; cTexto := 'Liberacao rejeitada'
+        Case alltrim(cCod) == '10' ; cTexto := 'Faturado'
+        Case alltrim(cCod) == 'ZZ' ; cTexto := 'Liberacao tardia'
+        Otherwise                  ; cTexto := 'Bloqueio de credito (' + alltrim(cCod) + ')'
+    EndCase
+
+Return cTexto
+
+/*/{Protheus.doc} fnGetDet
+    Detalhe do pedido: cabecalho + itens + credito do cliente.
+    Montado com JsonObject (toJson escapa caracteres especiais).
+    @type  Static Function
+/*/
+Static Function fnGetDet(cNum as character) as character
+
+    Local cResult := ''  as character
+    Local jResp   := nil as json
+    Local jIt     := nil as json
+    Local aItens  := {}  as array
+
+    dbSelectArea('SC5')
+    SC5->(dbSetOrder(1))   // C5_FILIAL+C5_NUM
+    dbSelectArea('SC6')
+    SC6->(dbSetOrder(1))   // C6_FILIAL+C6_NUM+C6_ITEM+C6_PRODUTO
+    dbSelectArea('SA1')
+    SA1->(dbSetOrder(1))   // A1_FILIAL+A1_COD+A1_LOJA
+
+    IF !SC5->(dbSeek(xFilial('SC5') + padr(alltrim(cNum), tamSX3('C5_NUM')[1])))
+        Return ''
+    EndIF
+
+    SA1->(dbSeek(xFilial('SA1') + SC5->C5_CLIENTE + SC5->C5_LOJACLI))
+
+    jResp := jsonObject():new()
+
+    // Itens
+    SC6->(dbSeek(xFilial('SC6') + SC5->C5_NUM))
+    While SC6->(!eof()) .And. SC6->C6_FILIAL == xFilial('SC6') .And. ;
+          SC6->C6_NUM == SC5->C5_NUM
+
+        jIt := jsonObject():new()
+        jIt['item']    := alltrim(SC6->C6_ITEM)
+        jIt['produto'] := alltrim(SC6->C6_PRODUTO)
+        jIt['descri']  := alltrim(SC6->C6_DESCRI)
+        jIt['qtd']     := SC6->C6_QTDVEN
+        jIt['preco']   := SC6->C6_PRCVEN
+        jIt['valor']   := SC6->C6_VALOR
+        aadd(aItens, jIt)
+
+        SC6->(dbSkip())
+    EndDo
+
+    jResp['pedido']   := alltrim(SC5->C5_NUM)
+    jResp['cliente']  := alltrim(SC5->C5_CLIENTE)
+    jResp['nome']     := alltrim(SA1->A1_NOME)
+    jResp['vendedor'] := alltrim(SC5->C5_VEND1)
+    jResp['emissao']  := dToC(SC5->C5_EMISSAO)
+    jResp['condpag']  := alltrim(SC5->C5_CONDPAG)
+    jResp['limite']   := SA1->A1_LC        // limite de credito
+    jResp['saldo']    := SA1->A1_SALDUP    // saldo devedor
+    jResp['valor']    := fnValorPed(SC5->C5_NUM)
+    jResp['itens']    := aItens
+
+    cResult := jResp:toJson()
+
+Return cResult
+
+/*/{Protheus.doc} fnLiberar
+    Libera o bloqueio de credito do pedido atualizando os registros
+    existentes da SC9: limpa o C9_BLCRED e grava a data de liberacao
+    (C9_DATALIB) - mesmo efeito da liberacao manual no MATA450.
+
+    NOTA (v7): a versao anterior usava MaLibDoFat, que GERA novos
+    registros de liberacao na SC9 (e com lAvalCred=.T. reavalia o
+    credito, podendo bloquear de novo). Os registros antigos
+    continuavam com C9_BLCRED preenchido e o pedido nao saia da
+    lista. A atualizacao direta e deterministica e simetrica a
+    rejeicao (que grava '09').
+    @type  Static Function
+/*/
+Static Function fnLiberar(cNum as character) as logical
+
+    Local lOk    := .F. as logical
+    Local cNumPd := padr(alltrim(cNum), tamSX3('C9_PEDIDO')[1]) as character
+    Local nVarr  := 0 as numeric   // registros do pedido varridos
+    Local nAlt   := 0 as numeric   // registros alterados
+    Local nFalha := 0 as numeric   // falhas de RecLock
+
+    dbSelectArea('SC9')
+    SC9->(dbSetOrder(1))   // C9_FILIAL+C9_PEDIDO+C9_ITEM+...
+
+    ConOut('=== fnLiberar: pedido [' + cNumPd + '] filial [' + xFilial('SC9') + '] ===')
+
+    IF !SC9->(dbSeek(xFilial('SC9') + cNumPd))
+        ConOut('fnLiberar: dbSeek NAO encontrou o pedido na SC9')
+        err:description := 'Pedido ' + cNum + ' nao encontrado na SC9 (filial ' + xFilial('SC9') + ')'
+        Return .F.
+    EndIF
+
+    While SC9->(!eof()) .And. SC9->C9_FILIAL == xFilial('SC9') .And. ;
+          SC9->C9_PEDIDO == cNumPd
+
+        nVarr++
+        ConOut('fnLiberar: item [' + SC9->C9_ITEM + '] C9_BLCRED [' + SC9->C9_BLCRED + '] recno ' + cValToChar(SC9->(recno())))
+
+        IF !empty(SC9->C9_BLCRED) .And. SC9->C9_BLCRED != '10'
+            IF RecLock('SC9', .F.)
+                SC9->C9_BLCRED  := space(tamSX3('C9_BLCRED')[1])   // limpa o bloqueio
+                SC9->C9_DATALIB := dDataBase                        // data da liberacao
+                SC9->(msUnlock())
+                nAlt++
+            Else
+                nFalha++
+                ConOut('fnLiberar: RecLock FALHOU no recno ' + cValToChar(SC9->(recno())))
+            EndIF
+        EndIF
+
+        SC9->(dbSkip())
+    EndDo
+
+    ConOut('fnLiberar: varridos ' + cValToChar(nVarr) + ' / alterados ' + cValToChar(nAlt) + ' / falhas lock ' + cValToChar(nFalha))
+
+    lOk := (nAlt > 0)
+
+    IF !lOk
+        IF nFalha > 0
+            err:description := 'Nao foi possivel travar os registros do pedido ' + cNum + ' (em uso por outro processo?)'
+        ElseIF nVarr == 0
+            err:description := 'Pedido ' + cNum + ' sem registros na filial ' + xFilial('SC9')
+        Else
+            err:description := 'Pedido ' + cNum + ' nao possui itens com bloqueio de credito (varridos: ' + cValToChar(nVarr) + ')'
+        EndIF
+    EndIF
+
+Return lOk
+
+/*/{Protheus.doc} fnRejeitar
+    Rejeita a liberacao: marca C9_BLCRED = '09' nos itens bloqueados.
+    @type  Static Function
+/*/
+Static Function fnRejeitar(cNum as character) as logical
+
+    Local lOk    := .F. as logical
+    Local cNumPd := padr(alltrim(cNum), tamSX3('C9_PEDIDO')[1]) as character
+    Local nVarr  := 0 as numeric
+    Local nAlt   := 0 as numeric
+    Local nFalha := 0 as numeric
+
+    dbSelectArea('SC9')
+    SC9->(dbSetOrder(1))   // C9_FILIAL+C9_PEDIDO+C9_ITEM+...
+
+    ConOut('=== fnRejeitar: pedido [' + cNumPd + '] filial [' + xFilial('SC9') + '] ===')
+
+    IF !SC9->(dbSeek(xFilial('SC9') + cNumPd))
+        ConOut('fnRejeitar: dbSeek NAO encontrou o pedido na SC9')
+        err:description := 'Pedido ' + cNum + ' nao encontrado na SC9 (filial ' + xFilial('SC9') + ')'
+        Return .F.
+    EndIF
+
+    While SC9->(!eof()) .And. SC9->C9_FILIAL == xFilial('SC9') .And. ;
+          SC9->C9_PEDIDO == cNumPd
+
+        nVarr++
+        ConOut('fnRejeitar: item [' + SC9->C9_ITEM + '] C9_BLCRED [' + SC9->C9_BLCRED + '] recno ' + cValToChar(SC9->(recno())))
+
+        IF !empty(SC9->C9_BLCRED) .And. SC9->C9_BLCRED != '10'
+            IF RecLock('SC9', .F.)
+                SC9->C9_BLCRED := '09'   // Liberacao Rejeitada (codigo oficial TDN)
+                SC9->(msUnlock())
+                nAlt++
+            Else
+                nFalha++
+                ConOut('fnRejeitar: RecLock FALHOU no recno ' + cValToChar(SC9->(recno())))
+            EndIF
+        EndIF
+
+        SC9->(dbSkip())
+    EndDo
+
+    ConOut('fnRejeitar: varridos ' + cValToChar(nVarr) + ' / alterados ' + cValToChar(nAlt) + ' / falhas lock ' + cValToChar(nFalha))
+
+    lOk := (nAlt > 0)
+
+    IF !lOk
+        IF nFalha > 0
+            err:description := 'Nao foi possivel travar os registros do pedido ' + cNum + ' (em uso por outro processo?)'
+        ElseIF nVarr == 0
+            err:description := 'Pedido ' + cNum + ' sem registros na filial ' + xFilial('SC9')
+        Else
+            err:description := 'Pedido ' + cNum + ' nao possui itens com bloqueio de credito (varridos: ' + cValToChar(nVarr) + ')'
+        EndIF
+    EndIF
+
+Return lOk
+
+/*/{Protheus.doc} fnNumBody
+    Extrai o numero do pedido do body JSON { "num": "000001" }.
+    @type  Static Function
+/*/
+Static Function fnNumBody() as character
+
+    Local cNum   := ''  as character
+    Local cBody  := ''  as character
+    Local cParse := ''  as character
+    Local jBody  := nil as json
+
+    cBody := oRest:getBodyRequest()
+
+    IF !empty(cBody)
+        jBody  := jsonObject():new()
+        cParse := jBody:fromJson(cBody)
+        IF valType(cParse) <> 'C' .And. valType(jBody['num']) == 'C'
+            cNum := jBody['num']
+        EndIF
+    EndIF
+
+Return cNum
+
+/*/{Protheus.doc} fnValorPed
+    Soma o valor total dos itens de um pedido (SC6).
+    @type  Static Function
+/*/
+Static Function fnValorPed(cNum as character) as numeric
+
+    Local nTotal  := 0 as numeric
+    Local nRecAnt := 0 as numeric
+    Local cNumPd  := '' as character
+
+    dbSelectArea('SC6')
+    SC6->(dbSetOrder(1))
+    nRecAnt := SC6->(recno())
+    cNumPd  := padr(alltrim(cNum), tamSX3('C6_NUM')[1])
+
+    SC6->(dbSeek(xFilial('SC6') + cNumPd))
+    While SC6->(!eof()) .And. SC6->C6_FILIAL == xFilial('SC6') .And. ;
+          SC6->C6_NUM == cNumPd
+        nTotal += SC6->C6_VALOR
+        SC6->(dbSkip())
+    EndDo
+
+    SC6->(dbGoto(nRecAnt))
+
+Return nTotal
