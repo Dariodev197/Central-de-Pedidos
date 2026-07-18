@@ -28,9 +28,21 @@
     </po-widget>
   </div>
 
+  <!-- Filtro local -->
+  <div class="po-row">
+    <po-input
+      class="po-md-6"
+      name="filtro"
+      p-clean
+      p-icon="po-icon-search"
+      p-placeholder="Filtrar por pedido ou cliente..."
+      [(ngModel)]="filtro">
+    </po-input>
+  </div>
+
   <!-- Lista de pedidos em formato de cards expansíveis -->
   <po-list-view
-    [p-items]="pedidos"
+    [p-items]="pedidosFiltrados"
     p-property-title="nome"
     p-property-subtitle="pedido"
     (p-show-detail)="aoExpandir($event)">
@@ -128,8 +140,8 @@
     </div>
   </po-list-view>
 
-  <div *ngIf="!carregando && pedidos.length === 0" class="vazio">
-    Nenhum pedido bloqueado por crédito no momento. Tudo liberado! 🎉
+  <div *ngIf="!carregando && pedidosFiltrados.length === 0" class="vazio">
+    {{ filtro ? 'Nenhum pedido corresponde ao filtro.' : 'Nenhum pedido bloqueado por crédito no momento. Tudo liberado! 🎉' }}
   </div>
 
 </po-page-default>

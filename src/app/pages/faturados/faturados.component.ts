@@ -1,39 +1,42 @@
 import { Component, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { FormsModule } from '@angular/forms';
 import {
   PoPageModule,
   PoWidgetModule,
   PoTableModule,
   PoTableColumn,
   PoLoadingModule,
+  PoFieldModule,
   PoNotificationService,
   PoPageAction,
-  PoDialogService,
 } from '@po-ui/ng-components';
 import { PedidoService } from '../../services/pedido.service';
 import { PedidoFaturado } from '../../models/pedido.model';
-import { TemaService } from '../../services/tema.service';
 
 /**
  * Pedidos Faturados — visão de acompanhamento.
- * Tabela clássica (po-table): consulta, volume maior, ordenação.
- * Colunas alinhadas com o JSON da API TLPP (v6):
- *   pedido, nome, vendedor, emissao, nfiscal, serie, valor
+ * Tabela clássica (po-table) com filtro local por pedido,
+ * cliente ou nota fiscal (client-side: a listagem já vem
+ * completa da API, filtrar em memória é instantâneo).
  */
 @Component({
   selector: 'app-faturados',
   standalone: true,
   imports: [
     CommonModule,
+    FormsModule,
     PoPageModule,
     PoWidgetModule,
     PoTableModule,
     PoLoadingModule,
+    PoFieldModule,
   ],
   templateUrl: './faturados.component.html',
 })
 export class FaturadosComponent implements OnInit {
   pedidos: PedidoFaturado[] = [];
+  filtro = '';
   carregando = false;
 
   colunas: PoTableColumn[] = [
@@ -46,26 +49,18 @@ export class FaturadosComponent implements OnInit {
     { property: 'valor',    label: 'Valor',       width: '16%', type: 'currency', format: 'BRL' },
   ];
 
-
-
   acoesPagina: PoPageAction[] = [
-  { label: 'Atualizar', icon: 'po-icon-refresh', action: () => this.carregar() },
-  
-];
+    { label: 'Atualizar', icon: 'po-icon-refresh', action: () => this.carregar() },
+  ];
 
-// 3. Injeta no construtor (junto dos que já existem)
-constructor(
-  private service: PedidoService,
-  private notification: PoNotificationService,
-  private dialog: PoDialogService,
-  private tema: TemaService
-) {}
+  constructor(
+    private service: PedidoService,
+    private notification: PoNotificationService
+  ) {}
 
-// 4. No ngOnInit, aplica o tema salvo ANTES de carregar
-ngOnInit(): void {
-  this.tema.aplicarTemaSalvo();
-  this.carregar();
-}
+  ngOnInit(): void {
+    this.carregar();
+  }
 
   carregar(): void {
     this.carregando = true;
@@ -81,7 +76,20 @@ ngOnInit(): void {
     });
   }
 
+  /** Lista exibida na tabela: aplica o filtro por pedido, cliente ou NF. */
+  get pedidosFiltrados(): PedidoFaturado[] {
+    const termo = this.filtro.trim().toLowerCase();
+    if (!termo) {
+      return this.pedidos;
+    }
+    return this.pedidos.filter(p =>
+      (p.pedido  || '').toLowerCase().includes(termo) ||
+      (p.nome    || '').toLowerCase().includes(termo) ||
+      (p.nfiscal || '').toLowerCase().includes(termo)
+    );
+  }
+
   get valorFaturado(): number {
-    return this.pedidos.reduce((s, p) => s + (p.valor || 0), 0);
+    return this.pedidosFiltrados.reduce((s, p) => s + (p.valor || 0), 0);
   }
 }

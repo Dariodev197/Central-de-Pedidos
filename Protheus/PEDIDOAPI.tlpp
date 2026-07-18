@@ -4,7 +4,6 @@
 /*/{Protheus.doc} PEDIDOAPI
     ============================================================
     API REST - Central de Liberacao de Credito de Pedidos
-    Padrao do curso_api_tabelas.tlpp:
       - fwAdapterBaseV2 para consultas GET (query, paginacao,
         search, order e JSON automaticos)
       - errorClass + BEGIN SEQUENCE/RECOVER + setFault

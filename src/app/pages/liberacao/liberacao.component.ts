@@ -15,7 +15,8 @@ import {
 import { PedidoService } from '../../services/pedido.service';
 import { PedidoBloqueado, PedidoDetalhe, ItemPedido } from '../../models/pedido.model';
 import { TemaService } from '../../services/tema.service';
-
+import { FormsModule } from '@angular/forms';
+import { PoFieldModule } from '@po-ui/ng-components';
 /**
  * Central de Liberação de Crédito.
  *
@@ -27,11 +28,7 @@ import { TemaService } from '../../services/tema.service';
  *
  * O financeiro vê os pedidos travados, expande pra ver os detalhes
  * e o consumo de limite do cliente, e libera ou rejeita.
- *
- * Campos alinhados com o JSON da API TLPP (v5):
- *   listagem: pedido, cliente, nome, vendedor, emissao,
- *             limite, saldo, bloqueio, valor, motivo
- *   detalhe : + condpag, itens[{item, produto, descri, qtd, preco, valor}]
+ * Filtro local por pedido, cliente (nome ou código).
  */
 @Component({
   selector: 'app-liberacao',
@@ -45,34 +42,34 @@ import { TemaService } from '../../services/tema.service';
     PoTagModule,
     PoButtonModule,
     PoLoadingModule,
+    FormsModule,
+    PoFieldModule,
   ],
   templateUrl: './liberacao.component.html',
 })
 export class LiberacaoComponent implements OnInit {
   pedidos: PedidoBloqueado[] = [];
   detalhes: Record<string, PedidoDetalhe> = {}; // cache de detalhe por pedido
+  filtro = ''; // filtro local (pedido, nome ou código do cliente)
   carregando = false;
   processando = ''; // número do pedido em processamento
 
   acoesPagina: PoPageAction[] = [
-  { label: 'Atualizar', icon: 'po-icon-refresh', action: () => this.carregar() },
+    { label: 'Atualizar', icon: 'po-icon-refresh', action: () => this.carregar() },
+  ];
 
-];
+  constructor(
+    private service: PedidoService,
+    private notification: PoNotificationService,
+    private dialog: PoDialogService,
+    private tema: TemaService
+  ) {}
 
-// 3. Injeta no construtor (junto dos que já existem)
-constructor(
-  private service: PedidoService,
-  private notification: PoNotificationService,
-  private dialog: PoDialogService,
-  private tema: TemaService
-) {}
+  ngOnInit(): void {
+    this.tema.aplicarTemaSalvo();
+    this.carregar();
+  }
 
-// 4. No ngOnInit, aplica o tema salvo ANTES de carregar
-ngOnInit(): void {
-  this.tema.aplicarTemaSalvo();
-  this.carregar();
-}
-  
   carregar(): void {
     this.carregando = true;
     this.service.listarBloqueados().subscribe({
@@ -85,6 +82,19 @@ ngOnInit(): void {
         this.carregando = false;
       },
     });
+  }
+
+  /** Lista exibida: aplica o filtro por pedido, nome ou código do cliente. */
+  get pedidosFiltrados(): PedidoBloqueado[] {
+    const termo = this.filtro.trim().toLowerCase();
+    if (!termo) {
+      return this.pedidos;
+    }
+    return this.pedidos.filter(p =>
+      (p.pedido  || '').toLowerCase().includes(termo) ||
+      (p.nome    || '').toLowerCase().includes(termo) ||
+      (p.cliente || '').toLowerCase().includes(termo)
+    );
   }
 
   // ----- Resumo (cards) -----

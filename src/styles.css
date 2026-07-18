@@ -184,3 +184,24 @@ html.tema-escuro .tabela-itens,
 html.tema-escuro .tabela-itens tbody tr { background: transparent; }
 html.tema-escuro .tabela-itens tbody tr:nth-child(even) { background: var(--color-neutral-light-10); }
 html.tema-escuro .barra            { background: var(--color-neutral-light-20); }
+
+/* Tema escuro: campos de entrada (po-input do filtro) */
+html.tema-escuro .po-input,
+html.tema-escuro po-input input {
+  background-color: var(--color-neutral-light-05);
+  color: var(--color-neutral-dark-90);
+  border-color: var(--color-neutral-light-30);
+}
+html.tema-escuro .po-input:focus,
+html.tema-escuro .po-input:hover {
+  background-color: var(--color-neutral-light-05);
+  color: var(--color-neutral-dark-90);
+}
+html.tema-escuro .po-input::placeholder {
+  color: var(--color-neutral-mid-60);
+}
+/* Autofill do Chrome insiste em fundo claro: força o escuro */
+html.tema-escuro .po-input:-webkit-autofill {
+  -webkit-box-shadow: 0 0 0 1000px var(--color-neutral-light-05) inset;
+  -webkit-text-fill-color: var(--color-neutral-dark-90);
+}
